@@ -91,12 +91,14 @@ void rgb_led_blue (void);
 void rgb_led_red (void);
 void rgb_led_down (void);
 
-void free_fall_detected (void);
+void Timer_Handler_Security_check (void);
 float get_total_accel (float AccX,float AccY,float AccZ);
-bool bank_angle_detected ();
+bool bank_angle_detected (float AngleX,float AngleY);
 bool servo_open (unsigned char angle);
 
 unsigned int freefall_check_flag;
+unsigned int bankAngel_check_flag;
+bool parachute_deploy_flag;
 const float freefall_threshold = 0.003;
 
 void setup() {
@@ -115,7 +117,7 @@ void setup() {
   else
     Serial.println(F("Can't set ITimer. Select another freq. or timer"));
 
-  ISR_Timer.setInterval(TIMER_INTERVAL_10ms,  free_fall_detected); //Activate fonction every 10ms
+  ISR_Timer.setInterval(TIMER_INTERVAL_10ms,  Timer_Handler_Security_check); //Activate fonction every 10ms
 
   ITimer.detachInterrupt(); //disable IRQ for led check
 
@@ -134,10 +136,24 @@ void setup() {
 // the loop function runs over and over again forever
 void loop() {
   imu.update();
-  if(freefall_check_flag >= 15){
+  if(((freefall_check_flag >= 15 || bankAngel_check_flag >= 25)) && parachute_deploy_flag == false){
+    ITimer.detachInterrupt(); //disable IRQ for led check
+    parachute_deploy_flag = true;
+    Serial.print("Parachute deploy !!!");
     rgb_led_red();
     PServo.write(90);
   }
+  if (parachute_deploy_flag == true){
+    delay(5000);
+    Serial.print("systeme reset");
+    parachute_deploy_flag = false;
+    freefall_check_flag = 0;
+    bankAngel_check_flag = 0;
+    PServo.write(10);
+    rgb_led_green();
+    ITimer.reattachInterrupt(); //reable IRQ
+  }
+
 }
 
 void rgb_led_green (void){
@@ -162,7 +178,7 @@ float get_total_accel(float AccX,float AccY,float AccZ){
   return total_accel;
 }
 
-void free_fall_detected (void){
+void Timer_Handler_Security_check (void){
   float t_accel = 0;
   t_accel = get_total_accel(imu.getAccX(),imu.getAccY(),imu.getAccZ());
   if (t_accel < freefall_threshold){
@@ -172,5 +188,21 @@ void free_fall_detected (void){
   }
   else if (freefall_check_flag > 0) {
     freefall_check_flag = 0;
+  }
+  bank_angle_detected(imu.getAngleX(),imu.getAngleY());
+}
+
+bool bank_angle_detected (float AngleX,float AngleY){
+  if (AngleX >= 45 || AngleX <= -45){
+    bankAngel_check_flag++;
+    return true;
+  }
+  else if(AngleY >= 45 || AngleY <= -45){
+    bankAngel_check_flag++;
+    return true;
+  }
+  else {
+    bankAngel_check_flag = 0;
+    return false;
   }
 }
