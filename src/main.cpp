@@ -1,4 +1,4 @@
-/////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////
 
 // These define's must be placed at the beginning before #include "SAMDTimerInterrupt.h"
 // _TIMERINTERRUPT_LOGLEVEL_ from 0 to 4
@@ -23,6 +23,7 @@
 #include <Servo.h>
 #include "SAMDTimerInterrupt.h"
 #include "SAMD_ISR_Timer.h"
+#include <SPI.h>
 
 #define HW_TIMER_INTERVAL_MS      10
 
@@ -75,16 +76,25 @@ void TimerHandler(void)
 
 ////////////////////////////////////////////////
 
-#define ADDR_MPU 0x68
-#define RGB_LED 0
-#define RGB_LED_PIN 3
-#define SDA 4
-#define SCL 3
-#define SERVO_PIN  2
+#define ADDR_MPU      0x68
+#define RGB_LED       0
+#define RGB_LED_PIN   3
+#define SDA           4
+#define SCL           3
+#define SERVO_PIN     2
+#define LORA_MOSI     10
+#define LORA_MISO     9
+#define LORA_SDK      8
+#define LORA_IO0      1
+#define LORA_RST      7
+#define LORA_NSS      0
+
+////////////////////////////////////////////////
 
 Adafruit_NeoPixel rgb_led (1,RGB_LED_PIN, NEO_GBR + NEO_KHZ800);
 MPU6050 imu (Wire);
 Servo PServo ;
+TinyLoRa lora = TinyLoRa(LORA_IO0,LORA_NSS,LORA_RST);
 
 void rgb_led_green (void);
 void rgb_led_blue (void);
@@ -100,12 +110,17 @@ unsigned int freefall_check_flag;
 unsigned int bankAngel_check_flag;
 bool parachute_deploy_flag;
 const float freefall_threshold = 0.003;
+unsigned char loraData[11] = {"hello LoRa"};
+
+////////////////////////////////////////////////
 
 void setup() {
 
   Wire.begin(); //i2c
   imu.begin(); //Déclanchement connection MPU6050
+  //lora.begin();
   Serial.begin(9600); //Déclanchement de la liaison serie
+  while (! Serial); // test purpose
   PServo.attach(SERVO_PIN);
   PServo.write(10);
 
@@ -129,10 +144,25 @@ void setup() {
   delay(1000);
   rgb_led_green();
 
+  // Initialize LoRa
+  Serial.print("Starting LoRa...");
+  // define channel to send data on
+  lora.setChannel(CH2);
+  // set datarate
+  lora.setDatarate(SF7BW125);
+    if(!lora.begin())
+  {
+    Serial.println("Failed");
+    Serial.println("Check your radio");
+    while(true);
+  }
+  Serial.println("OK");
+
   ITimer.reattachInterrupt(); //reable IRQ
 
 }
 
+////////////////////////////////////////////////
 // the loop function runs over and over again forever
 void loop() {
   imu.update();
@@ -155,6 +185,8 @@ void loop() {
   }
 
 }
+
+////////////////////////////////////////////////
 
 void rgb_led_green (void){
   rgb_led.setPixelColor(0,rgb_led.Color(0,255,0));
