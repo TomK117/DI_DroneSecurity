@@ -77,8 +77,8 @@ void TimerHandler(void)
 ////////////////////////////////////////////////
 
 #define ADDR_MPU      0x68
-#define RGB_LED       0
-#define RGB_LED_PIN   3
+#define USER_LED      13
+#define RGB_LED_PIN   6
 #define SDA           4
 #define SCL           3
 #define SERVO_PIN     2
@@ -86,8 +86,8 @@ void TimerHandler(void)
 #define LORA_MISO     9
 #define LORA_SDK      8
 #define LORA_IO0      1
-#define LORA_RST      7
-#define LORA_NSS      0
+#define LORA_RST      0
+#define LORA_NSS      3
 
 ////////////////////////////////////////////////
 
@@ -118,11 +118,8 @@ void setup() {
 
   Wire.begin(); //i2c
   imu.begin(); //Déclanchement connection MPU6050
-  //lora.begin();
   Serial.begin(9600); //Déclanchement de la liaison serie
-  while (! Serial); // test purpose
-  PServo.attach(SERVO_PIN);
-  PServo.write(10);
+  //while (! Serial); // test purpose
 
   // Interval in millisecs
   if (ITimer.attachInterruptInterval_MS(HW_TIMER_INTERVAL_MS, TimerHandler))
@@ -140,9 +137,14 @@ void setup() {
   rgb_led.setBrightness(25);
   rgb_led_red();
   delay(1000);
+  rgb_led_down();
   rgb_led_blue();
   delay(1000);
+  rgb_led_down();
   rgb_led_green();
+
+  PServo.attach(SERVO_PIN);
+  PServo.write(10);
 
   // Initialize LoRa
   Serial.print("Starting LoRa...");
@@ -150,13 +152,11 @@ void setup() {
   lora.setChannel(CH2);
   // set datarate
   lora.setDatarate(SF7BW125);
-    if(!lora.begin())
-  {
-    Serial.println("Failed");
-    Serial.println("Check your radio");
-    while(true);
+  while(!lora.begin()){
+      Serial.println("Failed");
+      Serial.println("Check your radio");
   }
-  Serial.println("OK");
+  Serial.println("Radio OK");
 
   ITimer.reattachInterrupt(); //reable IRQ
 
