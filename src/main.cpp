@@ -8,9 +8,9 @@
 #define _TIMERINTERRUPT_LOGLEVEL_     0
 
 // Select only one to be true for SAMD21. Must must be placed at the beginning before #include "SAMDTimerInterrupt.h"
-#define USING_TIMER_TC3         true      // Only TC3 can be used for SAMD51
+#define USING_TIMER_TC3         false      // Only TC3 can be used for SAMD51
 #define USING_TIMER_TC4         false     // Not to use with Servo library
-#define USING_TIMER_TC5         false
+#define USING_TIMER_TC5         true
 #define USING_TIMER_TCC         false
 #define USING_TIMER_TCC1        false
 #define USING_TIMER_TCC2        false     // Don't use this, can crash on some boards
@@ -76,25 +76,28 @@ void TimerHandler(void)
 
 ////////////////////////////////////////////////
 
-#define ADDR_MPU      0x68
-#define USER_LED      13
-#define RGB_LED_PIN   6
-#define SDA           4
-#define SCL           3
-#define SERVO_PIN     2
-#define LORA_MOSI     10
-#define LORA_MISO     9
-#define LORA_SDK      8
-#define LORA_IO0      1
-#define LORA_RST      0
-#define LORA_NSS      3
+#define ADDR_MPU          0x68
+#define USER_LED          13
+#define RGB_LED_PIN       6
+#define SDA_PIN           4
+#define SCL_PIN           5
+#define SERVO_PIN         2
+#define LORA_MOSI_PIN     10
+#define LORA_MISO_PIN     9
+#define LORA_SDK_PIN      8
+#define LORA_IO0_PIN      1
+#define LORA_RST_PIN      0
+#define LORA_NSS_PIN      3
+#define ANGLE_PARA_OPEN   45
+#define ANGLE_PARA_CLOSE  90
+#define FONCTION_ACTIVATE 1    // 1 free-fall // 2 free-fall + angle max 45 
 
 ////////////////////////////////////////////////
 
 Adafruit_NeoPixel rgb_led (1,RGB_LED_PIN, NEO_GBR + NEO_KHZ800);
 MPU6050 imu (Wire);
 Servo PServo ;
-TinyLoRa lora = TinyLoRa(LORA_IO0,LORA_NSS,LORA_RST);
+TinyLoRa lora = TinyLoRa(LORA_IO0_PIN,LORA_NSS_PIN,LORA_RST_PIN);
 
 void rgb_led_green (void);
 void rgb_led_blue (void);
@@ -116,10 +119,11 @@ unsigned char loraData[11] = {"hello LoRa"};
 
 void setup() {
 
+  Serial.begin(9600); //Déclanchement de la liaison serie
+  Serial.print("Serial UP");
   Wire.begin(); //i2c
   imu.begin(); //Déclanchement connection MPU6050
-  Serial.begin(9600); //Déclanchement de la liaison serie
-  //while (! Serial); // test purpose
+  /*//while (! Serial); // test purpose*/
 
   // Interval in millisecs
   if (ITimer.attachInterruptInterval_MS(HW_TIMER_INTERVAL_MS, TimerHandler))
@@ -134,7 +138,7 @@ void setup() {
   ITimer.detachInterrupt(); //disable IRQ for led check
 
   rgb_led.begin();
-  rgb_led.setBrightness(25);
+  rgb_led.setBrightness(50);
   rgb_led_red();
   delay(1000);
   rgb_led_down();
@@ -143,8 +147,8 @@ void setup() {
   rgb_led_down();
   rgb_led_green();
 
-  PServo.attach(SERVO_PIN);
-  PServo.write(10);
+  PServo.attach(2);
+  PServo.write(ANGLE_PARA_CLOSE);
 
   // Initialize LoRa
   Serial.print("Starting LoRa...");
@@ -152,6 +156,7 @@ void setup() {
   lora.setChannel(CH2);
   // set datarate
   lora.setDatarate(SF7BW125);
+
   while(!lora.begin()){
       Serial.println("Failed");
       Serial.println("Check your radio");
@@ -169,17 +174,17 @@ void loop() {
   if(((freefall_check_flag >= 15 || bankAngel_check_flag >= 25)) && parachute_deploy_flag == false){
     ITimer.detachInterrupt(); //disable IRQ for led check
     parachute_deploy_flag = true;
-    Serial.print("Parachute deploy !!!");
+    Serial.print("Parachute deploy !!! \r");
     rgb_led_red();
-    PServo.write(90);
+    PServo.write(ANGLE_PARA_OPEN);
   }
   if (parachute_deploy_flag == true){
     delay(5000);
-    Serial.print("systeme reset");
+    Serial.print("systeme reset \r");
     parachute_deploy_flag = false;
     freefall_check_flag = 0;
     bankAngel_check_flag = 0;
-    PServo.write(10);
+    PServo.write(ANGLE_PARA_CLOSE);
     rgb_led_green();
     ITimer.reattachInterrupt(); //reable IRQ
   }
@@ -221,7 +226,9 @@ void Timer_Handler_Security_check (void){
   else if (freefall_check_flag > 0) {
     freefall_check_flag = 0;
   }
-  bank_angle_detected(imu.getAngleX(),imu.getAngleY());
+  if(FONCTION_ACTIVATE > 1){
+    bank_angle_detected(imu.getAngleX(),imu.getAngleY());
+  }
 }
 
 bool bank_angle_detected (float AngleX,float AngleY){
