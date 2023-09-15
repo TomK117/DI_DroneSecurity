@@ -17,13 +17,13 @@
 
 #include <Arduino.h>
 #include <MPU6050_light.h>
-#include <TinyLoRa.h>
 #include <Wire.h>
 #include <Adafruit_NeoPixel.h>
 #include <Servo.h>
 #include "SAMDTimerInterrupt.h"
 #include "SAMD_ISR_Timer.h"
 #include <SPI.h>
+#include <RadioLib.h>
 
 #define HW_TIMER_INTERVAL_MS      10
 
@@ -94,7 +94,7 @@ void TimerHandler(void)
 Adafruit_NeoPixel rgb_led (1,RGB_LED_PIN, NEO_GBR + NEO_KHZ800);
 MPU6050 imu (Wire);
 Servo PServo ;
-TinyLoRa lora = TinyLoRa(LORA_IO0,LORA_NSS,LORA_RST);
+SX1278 lora_Rx = new Module(LORA_NSS,LORA_IO0,LORA_RST);
 
 void rgb_led_green (void);
 void rgb_led_blue (void);
@@ -106,11 +106,13 @@ float get_total_accel (float AccX,float AccY,float AccZ);
 bool bank_angle_detected (float AngleX,float AngleY);
 bool servo_open (unsigned char angle);
 
-unsigned int freefall_check_flag;
-unsigned int bankAngel_check_flag;
-bool parachute_deploy_flag;
+void setFlag(void);
+
+unsigned int freefall_check_flag = 0;
+unsigned int bankAngel_check_flag = 0;
+bool termination_flag = false;
+bool parachute_deploy_flag = false;
 const float freefall_threshold = 0.003;
-unsigned char loraData[11] = {"hello LoRa"};
 
 ////////////////////////////////////////////////
 
@@ -146,27 +148,62 @@ void setup() {
   PServo.attach(SERVO_PIN);
   PServo.write(10);
 
-  // Initialize LoRa
-  Serial.print("Starting LoRa...");
-  // define channel to send data on
-  lora.setChannel(CH2);
-  // set datarate
-  lora.setDatarate(SF7BW125);
-  while(!lora.begin()){
-      Serial.println("Failed");
-      Serial.println("Check your radio");
+ // initialize SX1278 with default settings
+  Serial.print(F("[SX1278] Initializing ... "));
+  int state = lora_Rx.begin();
+  if (state == RADIOLIB_ERR_NONE) {
+    Serial.println(F("success!"));
+  } else {
+    Serial.print(F("failed, code "));
+    Serial.println(state);
+    while (true);
   }
-  Serial.println("Radio OK");
+
+  // set the function that will be called
+  // when new packet is received
+  lora_Rx.setPacketReceivedAction(setFlag);
+
+  // start listening for LoRa packets
+  Serial.print(F("[SX1278] Starting to listen ... "));
+  state = lora_Rx.startReceive();
+  if (state == RADIOLIB_ERR_NONE) {
+    Serial.println(F("success!"));
+  } else {
+    Serial.print(F("failed, code "));
+    Serial.println(state);
+    while (true);
+  }
+  
+  // if needed, 'listen' mode can be disabled by calling
+  // any of the following methods:
+  //
+  // radio.standby()
+  // radio.sleep()
+  // radio.transmit();
+  // radio.receive();
+  // radio.scanChannel();
+
 
   ITimer.reattachInterrupt(); //reable IRQ
 
 }
 
+// flag to indicate that a packet was received
+volatile bool receivedFlag = false;
+
+// this function is called when a complete packet
+// is received by the module
+// IMPORTANT: this function MUST be 'void' type
+//            and MUST NOT have any arguments!
+#if defined(ESP8266) || defined(ESP32)
+  ICACHE_RAM_ATTR
+#endif
+
 ////////////////////////////////////////////////
 // the loop function runs over and over again forever
 void loop() {
   imu.update();
-  if(((freefall_check_flag >= 15 || bankAngel_check_flag >= 25)) && parachute_deploy_flag == false){
+  if(((freefall_check_flag >= 15 || bankAngel_check_flag >= 25 || termination_flag == true)) && parachute_deploy_flag == false){
     ITimer.detachInterrupt(); //disable IRQ for led check
     parachute_deploy_flag = true;
     Serial.print("Parachute deploy !!!");
@@ -177,6 +214,7 @@ void loop() {
     delay(5000);
     Serial.print("systeme reset");
     parachute_deploy_flag = false;
+    termination_flag = false;
     freefall_check_flag = 0;
     bankAngel_check_flag = 0;
     PServo.write(10);
@@ -184,6 +222,61 @@ void loop() {
     ITimer.reattachInterrupt(); //reable IRQ
   }
 
+  // check if the flag is set
+  if(receivedFlag) {
+    // reset flag
+    ITimer.detachInterrupt(); //disable IRQ for led checks
+    receivedFlag = false;
+
+    // you can read received data as an Arduino String
+    String str;
+    int state = lora_Rx.readData(str);
+
+    // you can also read received data as byte array
+    /*
+      byte byteArr[8];
+      int state = radio.readData(byteArr, 8);
+    */
+
+    if (str == "T"){
+      termination_flag = true ; 
+    }
+
+    if (state == RADIOLIB_ERR_NONE) {
+      // packet was successfully received
+      Serial.println(F("[SX1278] Received packet!"));
+
+      // print data of the packet
+      Serial.print(F("[SX1278] Data:\t\t"));
+      Serial.println(str);
+
+      // print RSSI (Received Signal Strength Indicator)
+      Serial.print(F("[SX1278] RSSI:\t\t"));
+      Serial.print(lora_Rx.getRSSI());
+      Serial.println(F(" dBm"));
+
+      // print SNR (Signal-to-Noise Ratio)
+      Serial.print(F("[SX1278] SNR:\t\t"));
+      Serial.print(lora_Rx.getSNR());
+      Serial.println(F(" dB"));
+
+      // print frequency error
+      Serial.print(F("[SX1278] Frequency error:\t"));
+      Serial.print(lora_Rx.getFrequencyError(true));
+      Serial.println(F(" Hz"));
+
+    } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
+      // packet was received, but is malformed
+      Serial.println(F("[SX1278] CRC error!"));
+
+    } else {
+      // some other error occurred
+      Serial.print(F("[SX1278] Failed, code "));
+      Serial.println(state);
+
+    }
+    ITimer.reattachInterrupt(); //reable IRQ
+  }
 }
 
 ////////////////////////////////////////////////
@@ -237,4 +330,9 @@ bool bank_angle_detected (float AngleX,float AngleY){
     bankAngel_check_flag = 0;
     return false;
   }
+}
+
+void setFlag(void) {
+  // we got a packet, set the flag
+  receivedFlag = true;
 }
