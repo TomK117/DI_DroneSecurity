@@ -8,9 +8,9 @@
 #define _TIMERINTERRUPT_LOGLEVEL_     0
 
 // Select only one to be true for SAMD21. Must must be placed at the beginning before #include "SAMDTimerInterrupt.h"
-#define USING_TIMER_TC3         false      // Only TC3 can be used for SAMD51
+#define USING_TIMER_TC3         true      // Only TC3 can be used for SAMD51
 #define USING_TIMER_TC4         false     // Not to use with Servo library
-#define USING_TIMER_TC5         true
+#define USING_TIMER_TC5         false
 #define USING_TIMER_TCC         false
 #define USING_TIMER_TCC1        false
 #define USING_TIMER_TCC2        false     // Don't use this, can crash on some boards
@@ -76,20 +76,20 @@ void TimerHandler(void)
 
 ////////////////////////////////////////////////
 
-#define ADDR_MPU          0x68
-#define USER_LED          13
-#define RGB_LED_PIN       6
-#define SDA_PIN           4
-#define SCL_PIN           5
-#define SERVO_PIN         2
-#define LORA_MOSI_PIN     10
-#define LORA_MISO_PIN     9
-#define LORA_SDK_PIN      8
-#define LORA_IO0_PIN      1
-#define LORA_RST_PIN      0
-#define LORA_NSS_PIN      3
-#define ANGLE_PARA_OPEN   45
-#define ANGLE_PARA_CLOSE  90
+#define ADDR_MPU      0x68
+#define USER_LED      13
+#define RGB_LED_PIN   6
+#define SDA           4
+#define SCL           3
+#define SERVO_PIN     2
+#define LORA_MOSI     10
+#define LORA_MISO     9
+#define LORA_SDK      8
+#define LORA_IO0      1
+#define LORA_RST      0
+#define LORA_NSS      3
+#define SERVO_OPEN    85  
+#define SERVO_CLOSE   110
 #define FONCTION_ACTIVATE 1    // 1 free-fall // 2 free-fall + angle max 45 
 
 ////////////////////////////////////////////////
@@ -97,7 +97,7 @@ void TimerHandler(void)
 Adafruit_NeoPixel rgb_led (1,RGB_LED_PIN, NEO_GBR + NEO_KHZ800);
 MPU6050 imu (Wire);
 Servo PServo ;
-TinyLoRa lora = TinyLoRa(LORA_IO0,LORA_NSS,LORA_RST);
+SX1278 lora_Rx = new Module(LORA_NSS,LORA_IO0,LORA_RST);
 
 void rgb_led_green (void);
 void rgb_led_blue (void);
@@ -121,11 +121,10 @@ const float freefall_threshold = 0.003;
 
 void setup() {
 
-  Serial.begin(9600); //Déclanchement de la liaison serie
-  Serial.print("Serial UP");
   Wire.begin(); //i2c
   imu.begin(); //Déclanchement connection MPU6050
-  /*//while (! Serial); // test purpose*/
+  Serial.begin(9600); //Déclanchement de la liaison serie
+  //while (! Serial); // test purpose
 
   // Interval in millisecs
   if (ITimer.attachInterruptInterval_MS(HW_TIMER_INTERVAL_MS, TimerHandler))
@@ -140,7 +139,7 @@ void setup() {
   ITimer.detachInterrupt(); //disable IRQ for led check
 
   rgb_led.begin();
-  rgb_led.setBrightness(50);
+  rgb_led.setBrightness(25);
   rgb_led_red();
   delay(1000);
   rgb_led_down();
@@ -149,18 +148,33 @@ void setup() {
   rgb_led_down();
   rgb_led_green();
 
-  PServo.attach(2);
-  PServo.write(ANGLE_PARA_CLOSE);
+  PServo.attach(SERVO_PIN);
+  PServo.write(SERVO_CLOSE);
 
-  // Initialize LoRa
-  Serial.print("Starting LoRa...");
-  // define channel to send data on
-  lora.setChannel(CH2);
-  // set datarate
-  lora.setDatarate(SF7BW125);
-  while(!lora.begin()){
-      Serial.println("Failed");
-      Serial.println("Check your radio");
+ // initialize SX1278 with default settings
+  Serial.print(F("[SX1278] Initializing ... "));
+  int state = lora_Rx.begin();
+  if (state == RADIOLIB_ERR_NONE) {
+    Serial.println(F("success!"));
+  } else {
+    Serial.print(F("failed, code "));
+    Serial.println(state);
+    while (true);
+  }
+
+  // set the function that will be called
+  // when new packet is received
+  lora_Rx.setPacketReceivedAction(setFlag);
+
+  // start listening for LoRa packets
+  Serial.print(F("[SX1278] Starting to listen ... "));
+  state = lora_Rx.startReceive();
+  if (state == RADIOLIB_ERR_NONE) {
+    Serial.println(F("success!"));
+  } else {
+    Serial.print(F("failed, code "));
+    Serial.println(state);
+    while (true);
   }
   
   // if needed, 'listen' mode can be disabled by calling
@@ -195,18 +209,18 @@ void loop() {
   if(((freefall_check_flag >= 15 || bankAngel_check_flag >= 25 || termination_flag == true)) && parachute_deploy_flag == false){
     ITimer.detachInterrupt(); //disable IRQ for led check
     parachute_deploy_flag = true;
-    Serial.print("Parachute deploy !!! \r");
+    Serial.print("Parachute deploy !!! \n");
     rgb_led_red();
-    PServo.write(ANGLE_PARA_OPEN);
+    PServo.write(SERVO_OPEN);
   }
   if (parachute_deploy_flag == true){
     delay(5000);
-    Serial.print("systeme reset \r");
+    Serial.print("systeme reset \n");
     parachute_deploy_flag = false;
     termination_flag = false;
     freefall_check_flag = 0;
     bankAngel_check_flag = 0;
-    PServo.write(ANGLE_PARA_CLOSE);
+    PServo.write(SERVO_CLOSE);
     rgb_led_green();
     ITimer.reattachInterrupt(); //reable IRQ
   }
